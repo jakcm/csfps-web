@@ -738,7 +738,7 @@ function update(dt) {
     if (playerModel && playerModelLoaded) {
       playerModel.visible = true;
       playerModel.position.set(player.position.x, player.position.y - 1.0, player.position.z);
-      playerModel.rotation.y = yaw;
+      playerModel.rotation.y = yaw + Math.PI;
     }
   } else {
     // First person camera

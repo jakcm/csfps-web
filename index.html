@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>CS FPS Proto - 网页版</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #000; font-family: Arial, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; }
+canvas { display: block; touch-action: none; }
+
+/* Crosshair */
+#crosshair {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 30px; height: 30px;
+  pointer-events: none; z-index: 10;
+}
+#crosshair::before, #crosshair::after {
+  content: ''; position: absolute; background: rgba(255,255,255,0.8);
+}
+#crosshair::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
+#crosshair::after { height: 2px; width: 100%; top: 50%; transform: translateY(-50%); }
+
+/* HUD */
+#hud {
+  position: fixed; top: 20px; left: 20px; z-index: 20;
+  color: #fff; font-size: 22px; font-family: 'Courier New', monospace;
+  text-shadow: 2px 2px 2px rgba(0,0,0,0.8);
+  pointer-events: none;
+}
+#score { color: #4CAF50; font-weight: bold; font-size: 28px; }
+#hits { color: #FF9800; }
+#hp { color: #FF4444; }
+
+/* View toggle button */
+#viewToggle {
+  position: fixed; top: 20px; right: 20px; z-index: 25;
+  background: rgba(0,0,0,0.5);
+  color: #fff; font-size: 15px; font-family: Arial, sans-serif;
+  padding: 8px 14px; border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px; cursor: pointer; pointer-events: auto;
+  transition: background 0.2s;
+}
+#viewToggle:hover { background: rgba(0,0,0,0.7); }
+#startScreen {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,0.9);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  color: #fff; font-family: Arial, sans-serif;
+  cursor: pointer;
+}
+#startScreen h1 {
+  font-size: 48px; color: #4CAF50; margin-bottom: 10px;
+  text-shadow: 0 0 20px rgba(76,175,80,0.5);
+}
+#startScreen p { font-size: 18px; color: #aaa; margin: 8px 0; }
+#startScreen .controls {
+  margin-top: 30px; background: rgba(255,255,255,0.1);
+  padding: 20px 30px; border-radius: 8px;
+}
+#startScreen .controls div { margin: 5px 0; color: #ccc; font-size: 14px; }
+#startScreen .controls kbd {
+  background: #333; color: #fff; padding: 2px 8px; border-radius: 3px;
+  border: 1px solid #555; font-size: 13px;
+}
+#startBtn {
+  margin-top: 30px; padding: 15px 50px; font-size: 22px;
+  background: #4CAF50; color: #fff; border: none; border-radius: 6px;
+  cursor: pointer; transition: background 0.2s;
+}
+#startBtn:hover { background: #45a049; }
+
+/* Hit marker */
+#hitMarker {
+  position: fixed; top: 50%; left: 50%; z-index: 15;
+  width: 40px; height: 40px; pointer-events: none;
+  transform: translate(-50%, -50%) rotate(45deg);
+  opacity: 0; transition: opacity 0.1s;
+}
+#hitMarker.show { opacity: 1; }
+#hitMarker::before, #hitMarker::after {
+  content: ''; position: absolute; background: #fff;
+}
+#hitMarker::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
+#hitMarker::after { height: 2px; width: 100%; top: 50%; transform: translateY(-50%); }
+
+/* Damage flash */
+#damageFlash {
+  position: fixed; inset: 0; z-index: 8; pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(255,0,0,0.4));
+  opacity: 0; transition: opacity 0.15s;
+}
+
+/* ========== TOUCH CONTROLS ========== */
+#touchContainer {
+  position: fixed; inset: 0; z-index: 12;
+  pointer-events: none; touch-action: none;
+  display: none;
+}
+
+/* Virtual joystick (left side) */
+#joystickZone {
+  position: absolute;
+  left: 0; bottom: 0;
+  width: 50%; height: 100%;
+  pointer-events: auto; touch-action: none;
+}
+#joystickBase {
+  position: absolute;
+  left: 80px; bottom: 80px;
+  width: 120px; height: 120px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  border: 2px solid rgba(255,255,255,0.2);
+  pointer-events: none;
+}
+#joystickKnob {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 50px; height: 50px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.25);
+  border: 2px solid rgba(255,255,255,0.4);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: none;
+}
+
+/* Look zone (right side) + shoot */
+#lookShootZone {
+  position: absolute;
+  right: 0; bottom: 0;
+  width: 50%; height: 100%;
+  pointer-events: auto; touch-action: none;
+}
+
+/* Jump button */
+#jumpBtn {
+  position: absolute;
+  right: 40px; bottom: 40px;
+  width: 70px; height: 70px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  border: 2px solid rgba(255,255,255,0.25);
+  color: rgba(255,255,255,0.6);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+/* Touch controls hint overlay */
+#touchHint {
+  position: fixed;
+  left: 50%; bottom: 200px;
+  transform: translateX(-50%);
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  padding: 8px 16px;
+  color: rgba(255,255,255,0.5);
+  font-size: 13px;
+  pointer-events: none;
+  z-index: 13;
+  display: none;
+}
+</style>
+</head>
+<body>
+
+<div id="startScreen">
+  <h1>🎯 CS FPS 原型</h1>
+  <p>浏览器中的第一人称射击体验</p>
+  <div class="controls">
+    <div><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> 移动 &nbsp;|&nbsp; <kbd>空格</kbd> 跳跃</div>
+    <div><kbd>鼠标</kbd> 瞄准 &nbsp;|&nbsp; <kbd>左键</kbd> 射击</div>
+    <div><kbd>C</kbd> 切换视角 &nbsp;|&nbsp; 按钮切换第一/第三人称</div>
+    <div>📱 移动端支持触摸操作</div>
+  </div>
+  <button id="startBtn">🎮 开始游戏</button>
+</div>
+
+<div id="viewToggle">🎯 第一人称</div>
+<div id="crosshair"></div>
+<div id="hitMarker"></div>
+<div id="damageFlash"></div>
+<div id="hud">
+  <div>得分: <span id="score">0</span></div>
+  <div>命中: <span id="hits">0</span></div>
+  <div style="font-size:14px;color:#888;margin-top:10px;">
+    <span id="hp">❤️ 100</span>
+  </div>
+</div>
+
+<!-- Touch controls UI -->
+<div id="touchContainer">
+  <div id="joystickZone">
+    <div id="joystickBase"><div id="joystickKnob"></div></div>
+  </div>
+  <div id="lookShootZone"></div>
+  <div id="jumpBtn">JUMP</div>
+  <div id="touchHint">👆 左半屏移动 · 右半屏瞄准射击</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// ========== SCENE SETUP ==========
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB);
+scene.fog = new THREE.Fog(0x87CEEB, 50, 100);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
+camera.position.set(0, 1.7, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+
+// ========== INPUT SYSTEM ==========
+const keys = {};
+let isLocked = false;
+let pitch = 0, yaw = 0;
+
+// Desktop keyboard
+document.addEventListener('keydown', e => { keys[e.code] = true; });
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+renderer.domElement.addEventListener('click', () => {
+  if (!isLocked && document.getElementById('startScreen').style.display !== 'none') return;
+  if (!isLocked) {
+    renderer.domElement.requestPointerLock();
+  }
+});
+
+document.addEventListener('pointerlockchange', () => {
+  isLocked = document.pointerLockElement === renderer.domElement;
+});
+
+document.addEventListener('mousemove', e => {
+  if (!isLocked) return;
+  yaw -= e.movementX * 0.002;
+  pitch -= e.movementY * 0.002;
+  pitch = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, pitch));
+});
+
+document.addEventListener('keydown', e => {
+  if (e.code === 'Escape' && isLocked) {
+    document.exitPointerLock();
+  }
+  if (e.code === 'KeyC' && isLocked) {
+    toggleView();
+  }
+});
+
+// Mouse button tracking
+document.addEventListener('mousedown', e => { if (e.button === 0) keys['Mouse0'] = true; });
+document.addEventListener('mouseup', e => { if (e.button === 0) keys['Mouse0'] = false; });
+
+// ========== TOUCH CONTROLS ==========
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+let touchInput = { moveX: 0, moveY: 0, lookX: 0, lookY: 0, shooting: false, jumping: false };
+let touchLookActive = false;
+let joystickActive = false;
+let joystickTouchId = null;
+let lookTouchId = null;
+let lastLookX = 0, lastLookY = 0;
+
+const touchContainer = document.getElementById('touchContainer');
+const joystickZone = document.getElementById('joystickZone');
+const lookShootZone = document.getElementById('lookShootZone');
+const joystickKnob = document.getElementById('joystickKnob');
+const joystickBase = document.getElementById('joystickBase');
+const jumpBtn = document.getElementById('jumpBtn');
+const touchHint = document.getElementById('touchHint');
+
+if (isTouchDevice) {
+  touchContainer.style.display = 'block';
+  touchHint.style.display = 'block';
+  setTimeout(() => { touchHint.style.display = 'none'; }, 4000);
+}
+
+// Joystick zone
+joystickZone.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (joystickActive) return;
+  const touch = e.changedTouches[0];
+  joystickTouchId = touch.identifier;
+  joystickActive = true;
+  const rect = joystickBase.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  handleJoystickMove(touch.clientX, touch.clientY, cx, cy);
+}, { passive: false });
+
+joystickZone.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const touch = findTouchById(e.changedTouches, joystickTouchId);
+  if (!touch) return;
+  const rect = joystickBase.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  handleJoystickMove(touch.clientX, touch.clientY, cx, cy);
+}, { passive: false });
+
+joystickZone.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  const touch = findTouchById(e.changedTouches, joystickTouchId);
+  if (!touch) return;
+  joystickActive = false;
+  joystickTouchId = null;
+  touchInput.moveX = 0;
+  touchInput.moveY = 0;
+  joystickKnob.style.transform = 'translate(-50%, -50%)';
+}, { passive: false });
+
+joystickZone.addEventListener('touchcancel', (e) => {
+  joystickActive = false;
+  joystickTouchId = null;
+  touchInput.moveX = 0;
+  touchInput.moveY = 0;
+  joystickKnob.style.transform = 'translate(-50%, -50%)';
+}, { passive: false });
+
+function handleJoystickMove(tx, ty, cx, cy) {
+  let dx = tx - cx;
+  let dy = ty - cy;
+  const maxR = 50;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  let clampedDist = Math.min(dist, maxR);
+  const angle = Math.atan2(dy, dx);
+  const kx = Math.cos(angle) * clampedDist;
+  const ky = Math.sin(angle) * clampedDist;
+  joystickKnob.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
+  
+  const norm = dist > 0 ? Math.min(dist / maxR, 1) : 0;
+  if (dist > 8) {
+    touchInput.moveX = (dx / dist) * norm;
+    touchInput.moveY = (dy / dist) * norm;
+  } else {
+    touchInput.moveX = 0;
+    touchInput.moveY = 0;
+  }
+}
+
+// Look/shoot zone
+lookShootZone.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const touch = e.changedTouches[0];
+  lookTouchId = touch.identifier;
+  touchLookActive = true;
+  lastLookX = touch.clientX;
+  lastLookY = touch.clientY;
+  touchInput.shooting = true;
+}, { passive: false });
+
+lookShootZone.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const touch = findTouchById(e.changedTouches, lookTouchId);
+  if (!touch) return;
+  const dx = touch.clientX - lastLookX;
+  const dy = touch.clientY - lastLookY;
+  touchInput.lookX = dx;
+  touchInput.lookY = dy;
+  lastLookX = touch.clientX;
+  lastLookY = touch.clientY;
+}, { passive: false });
+
+lookShootZone.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  const touch = findTouchById(e.changedTouches, lookTouchId);
+  if (!touch) return;
+  lookTouchId = null;
+  touchLookActive = false;
+  touchInput.lookX = 0;
+  touchInput.lookY = 0;
+  touchInput.shooting = false;
+}, { passive: false });
+
+lookShootZone.addEventListener('touchcancel', (e) => {
+  lookTouchId = null;
+  touchLookActive = false;
+  touchInput.lookX = 0;
+  touchInput.lookY = 0;
+  touchInput.shooting = false;
+}, { passive: false });
+
+// Jump button
+jumpBtn.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  touchInput.jumping = true;
+}, { passive: false });
+jumpBtn.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  touchInput.jumping = false;
+}, { passive: false });
+jumpBtn.addEventListener('touchcancel', (e) => {
+  touchInput.jumping = false;
+}, { passive: false });
+
+function findTouchById(touchList, id) {
+  for (let i = 0; i < touchList.length; i++) {
+    if (touchList[i].identifier === id) return touchList[i];
+  }
+  return null;
+}
+
+// Prevent context menu
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+// ========== LIGHTING ==========
+const ambientLight = new THREE.AmbientLight(0x404060, 0.6);
+scene.add(ambientLight);
+
+const sunLight = new THREE.DirectionalLight(0xFFEECC, 1.5);
+sunLight.position.set(50, 100, 30);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.width = 2048;
+sunLight.shadow.mapSize.height = 2048;
+sunLight.shadow.camera.near = 0.5;
+sunLight.shadow.camera.far = 150;
+sunLight.shadow.camera.left = -50;
+sunLight.shadow.camera.right = 50;
+sunLight.shadow.camera.top = 50;
+sunLight.shadow.camera.bottom = -50;
+scene.add(sunLight);
+
+const fillLight = new THREE.DirectionalLight(0x8888FF, 0.4);
+fillLight.position.set(-30, 50, -20);
+scene.add(fillLight);
+
+const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0x3a7d44, 0.8);
+scene.add(hemiLight);
+
+// ========== GROUND ==========
+const groundGeo = new THREE.PlaneGeometry(100, 100);
+const groundMat = new THREE.MeshStandardMaterial({ 
+  color: 0x3a7d44, roughness: 0.9, metalness: 0 
+});
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Grid for visual reference
+const gridHelper = new THREE.GridHelper(100, 50, 0x4CAF50, 0x2d5e33);
+gridHelper.position.y = 0.05;
+scene.add(gridHelper);
+
+// ========== WALLS / OBSTACLES ==========
+function createWall(w, h, d, x, y, z, color = 0x888888) {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.1 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  return { x, y, z, w, h, d };
+}
+
+const walls = [];
+walls.push(createWall(100, 3, 1, 0, 1.5, -50, 0x666666));
+walls.push(createWall(100, 3, 1, 0, 1.5, 50, 0x666666));
+walls.push(createWall(1, 3, 100, -50, 1.5, 0, 0x666666));
+walls.push(createWall(1, 3, 100, 50, 1.5, 0, 0x666666));
+walls.push(createWall(8, 2, 0.5, -15, 1, -10, 0x999999));
+walls.push(createWall(0.5, 2, 8, 12, 1, -15, 0x999999));
+walls.push(createWall(6, 1.5, 0.5, 5, 0.75, 12, 0x888888));
+walls.push(createWall(0.5, 2.5, 6, -20, 1.25, 8, 0x777777));
+walls.push(createWall(4, 1.5, 4, 25, 0.75, 5, 0x666666));
+
+// ========== TARGETS ==========
+const targets = [];
+let score = 0;
+let hits = 0;
+
+function createTarget(x, y, z, color = 0xFF4444) {
+  const geo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.3 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  const edgeGeo = new THREE.EdgesGeometry(geo);
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 });
+  const edge = new THREE.LineSegments(edgeGeo, edgeMat);
+  mesh.add(edge);
+  targets.push({ mesh, active: true, origColor: color, respawnTimer: 0 });
+  return mesh;
+}
+
+createTarget(8, 1.5, -5, 0xFF4444);
+createTarget(-8, 1.5, 8, 0x44AAFF);
+createTarget(15, 1.5, -12, 0xFFAA00);
+createTarget(-15, 1.5, 15, 0xFF44FF);
+createTarget(0, 0.9, 20, 0x44FF44);
+createTarget(5, 1.5, -20, 0xFF6644);
+createTarget(-5, 3.5, 0, 0xAA44FF);
+createTarget(20, 1.5, -8, 0x44AAAA);
+createTarget(-22, 1.5, -5, 0xFF8844);
+createTarget(10, 3.5, 12, 0x44AAFF);
+
+// ========== PHYSICS (Simple) ==========
+function isInsideBox(px, py, pz, box) {
+  const rx = Math.abs(px - box.x);
+  const ry = Math.abs(py - box.y);
+  const rz = Math.abs(pz - box.z);
+  return rx < box.w/2 + 0.4 && ry < box.h/2 + 0.4 && rz < box.d/2 + 0.4;
+}
+
+// ========== PLAYER ==========
+const player = { 
+  position: new THREE.Vector3(0, 1.7, 0), 
+  velocity: new THREE.Vector3(0, 0, 0),
+  onGround: false,
+  hp: 100
+};
+
+// ========== VIEW MODE ==========
+let viewMode = 'third'; // 'first' | 'third'
+let viewTransition = 1; // 0=first, 1=third (for lerp)
+const THIRD_PERSON_DIST = 3.0;
+const THIRD_PERSON_HEIGHT = 1.5;
+
+// Player 3D model
+let playerModel = null;
+let playerModelLoaded = false;
+const modelLoader = new GLTFLoader();
+
+function loadPlayerModel() {
+  const startScreen = document.getElementById('startScreen');
+  startScreen.innerHTML += '<p style="margin-top:10px;font-size:14px;color:#888;">加载角色模型中...</p>';
+  modelLoader.load(
+    './swat.glb',
+    (gltf) => {
+      playerModel = gltf.scene;
+      playerModel.scale.set(0.8, 0.8, 0.8);
+      playerModel.visible = (viewMode === 'third');
+      playerModel.traverse((node) => {
+        if (node.isMesh) {
+          node.castShadow = true;
+          node.receiveShadow = true;
+        }
+      });
+      scene.add(playerModel);
+      playerModelLoaded = true;
+      const loadingText = startScreen.querySelector('p:last-child');
+      if (loadingText) loadingText.remove();
+    },
+    undefined,
+    (err) => {
+      console.warn('Player model load failed:', err);
+      playerModelLoaded = false;
+    }
+  );
+}
+
+function toggleView() {
+  viewMode = viewMode === 'first' ? 'third' : 'first';
+  const btn = document.getElementById('viewToggle');
+  btn.textContent = viewMode === 'third' ? '🎯 第一人称' : '👤 第三人称';
+}
+
+// Start model loading
+loadPlayerModel();
+
+// ========== SHOOTING ==========
+const raycaster = new THREE.Raycaster();
+const shootCooldown = { current: 0, max: 0.15 };
+
+function shoot() {
+  if (shootCooldown.current > 0) return;
+  shootCooldown.current = shootCooldown.max;
+
+  const dir = new THREE.Vector3(0, 0, -1);
+  const euler = new THREE.Euler(pitch, yaw, 0, 'YXZ');
+  dir.applyEuler(euler);
+
+  raycaster.set(camera.position, dir);
+  raycaster.far = 50;
+
+  let hit = false;
+  for (const t of targets) {
+    if (!t.active) continue;
+    const box = new THREE.Box3().setFromObject(t.mesh);
+    const intersect = raycaster.ray.intersectsBox(box);
+    if (intersect) {
+      hit = true;
+      t.active = false;
+      t.respawnTimer = 0.5;
+      t.mesh.material.color.setHex(0xFFFFFF);
+      t.mesh.scale.set(1.3, 1.3, 1.3);
+      score += 10;
+      hits++;
+      document.getElementById('score').textContent = score;
+      document.getElementById('hits').textContent = hits;
+      
+      const hm = document.getElementById('hitMarker');
+      hm.classList.add('show');
+      setTimeout(() => hm.classList.remove('show'), 120);
+      break;
+    }
+  }
+}
+
+// ========== GAME LOOP ==========
+const clock = new THREE.Clock();
+const speed = 8;
+
+function update(dt) {
+  if (shootCooldown.current > 0) shootCooldown.current -= dt;
+
+  // Respawn targets
+  for (const t of targets) {
+    if (!t.active && t.respawnTimer > 0) {
+      t.respawnTimer -= dt;
+      if (t.respawnTimer <= 0) {
+        t.active = true;
+        t.mesh.material.color.setHex(t.origColor);
+        t.mesh.scale.set(1, 1, 1);
+      }
+    }
+  }
+
+  // --- INPUT ---
+  // Touch joystick -> movement
+  let moveForward = 0, moveRight = 0;
+  
+  if (isTouchDevice && touchLookActive) {
+    // Touch look
+    yaw -= touchInput.lookX * 0.003;
+    pitch -= touchInput.lookY * 0.003;
+    pitch = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, pitch));
+    touchInput.lookX = 0;
+    touchInput.lookY = 0;
+  }
+
+  if (isTouchDevice && joystickActive) {
+    moveForward = -touchInput.moveY;
+    moveRight = touchInput.moveX;
+  } else {
+    if (keys['KeyW']) moveForward += 1;
+    if (keys['KeyS']) moveForward -= 1;
+    if (keys['KeyA']) moveRight -= 1;
+    if (keys['KeyD']) moveRight += 1;
+  }
+
+  // Movement direction (relative to yaw)
+  const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+  const right = new THREE.Vector3(forward.z, 0, -forward.x);
+
+  const moveDir = new THREE.Vector3(0, 0, 0);
+  moveDir.add(forward.clone().multiplyScalar(moveForward));
+  moveDir.add(right.clone().multiplyScalar(moveRight));
+  
+  if (moveDir.length() > 0) {
+    moveDir.normalize().multiplyScalar(speed);
+  }
+
+  // Gravity
+  player.velocity.y -= 25 * dt;
+
+  // Jump
+  const wantsJump = keys['Space'] || (isTouchDevice && touchInput.jumping);
+  if (wantsJump && player.onGround) {
+    player.velocity.y = 7;
+    player.onGround = false;
+  }
+
+  // Horizontal movement
+  player.velocity.x = moveDir.x;
+  player.velocity.z = moveDir.z;
+
+  // Apply velocity
+  player.position.x += player.velocity.x * dt;
+  player.position.z += player.velocity.z * dt;
+  
+  // Collision with walls
+  for (const wall of walls) {
+    if (isInsideBox(player.position.x, player.position.y, player.position.z, wall)) {
+      if (moveDir.x !== 0) {
+        const pushX = player.position.x > wall.x ? wall.w/2 + 0.4 : -(wall.w/2 + 0.4);
+        player.position.x = wall.x + pushX;
+      }
+      if (moveDir.z !== 0) {
+        const pushZ = player.position.z > wall.z ? wall.d/2 + 0.4 : -(wall.d/2 + 0.4);
+        player.position.z = wall.z + pushZ;
+      }
+    }
+  }
+
+  // Vertical
+  player.position.y += player.velocity.y * dt;
+
+  // Ground collision
+  if (player.position.y <= 1.7) {
+    player.position.y = 1.7;
+    player.velocity.y = 0;
+    player.onGround = true;
+  }
+
+  // Boundary
+  player.position.x = Math.max(-48, Math.min(48, player.position.x));
+  player.position.z = Math.max(-48, Math.min(48, player.position.z));
+
+  // Update camera and model based on view mode
+  if (viewMode === 'third') {
+    // Third person camera behind player
+    const offset = new THREE.Vector3(0, THIRD_PERSON_HEIGHT, THIRD_PERSON_DIST);
+    offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    const targetPos = player.position.clone().add(offset);
+    
+    // Smooth transition
+    const lerpSpeed = 8;
+    camera.position.lerp(targetPos, Math.min(1, lerpSpeed * dt));
+    camera.lookAt(player.position.x, player.position.y + 1.2, player.position.z);
+    
+    // Update player model
+    if (playerModel && playerModelLoaded) {
+      playerModel.visible = true;
+      playerModel.position.set(player.position.x, player.position.y - 1.0, player.position.z);
+      playerModel.rotation.y = yaw;
+    }
+  } else {
+    // First person camera
+    camera.position.lerp(player.position, Math.min(1, 10 * dt));
+    
+    // Apply rotation
+    const euler = new THREE.Euler(pitch, yaw, 0, 'YXZ');
+    camera.quaternion.setFromEuler(euler);
+    
+    // Hide model in first person
+    if (playerModel && playerModelLoaded) {
+      playerModel.visible = false;
+    }
+  }
+
+  // Shooting
+  if ((isLocked && keys['Mouse0']) || (isTouchDevice && touchInput.shooting)) {
+    shoot();
+  }
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  update(dt);
+  renderer.render(scene, camera);
+}
+
+// ========== RESIZE ==========
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ========== VIEW TOGGLE ==========
+document.getElementById('viewToggle').addEventListener('click', toggleView);
+
+// ========== START ==========
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('startScreen').addEventListener('click', startGame);
+
+function startGame() {
+  document.getElementById('startScreen').style.display = 'none';
+  // Set initial camera for third person
+  const offset = new THREE.Vector3(0, THIRD_PERSON_HEIGHT, THIRD_PERSON_DIST);
+  offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+  camera.position.copy(player.position).add(offset);
+  camera.lookAt(player.position.x, player.position.y + 1.2, player.position.z);
+  if (!isTouchDevice) {
+    renderer.domElement.requestPointerLock();
+  } else {
+    isLocked = true; // Touch mode: always "locked"
+  }
+}
+
+animate();
+console.log('CS FPS Proto started! (with touch support)');
+</script>
+</body>
+</html>
